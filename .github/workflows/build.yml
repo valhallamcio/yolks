@@ -1,0 +1,84 @@
+# Builds the four yolks, smoke-tests each one in the Wings container shape, then pushes three tags per image:
+#   <image>                     moving tag, the newest build of that image
+#   <image>-<zulu>              pinned to the Zulu build (for rollback and for CRaC image mode)
+#   <image>-<zulu>-<commit>     one per commit, never reused
+# The Azul base is pinned by digest, so a build changes only with a commit. There is no scheduled rebuild.
+# Bump a JDK: edit base, zulu and expect in the matrix (README "Bump a JDK"), push to main.
+name: build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [Dockerfile, entrypoint.sh, test/**, .github/workflows/build.yml]
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: java_8_zulu
+            base: docker.io/azul/zulu-openjdk:8u512-8.98@sha256:42f182736ceff762c7763a6e75b90a53f745f2d3466efda4dae5d182ec581164
+            zulu: 8.98.0.107
+            expect: Zulu 8.98.0.107-CA
+            crac: ""
+          - image: java_17_zulu_crac
+            base: docker.io/azul/zulu-openjdk:17.0.20.1-17.68-jdk-crac@sha256:be4b60133f01af2e4ded163445dd0bed05cb24b3fbb879b16b3d46480d3ead64
+            zulu: 17.68.203
+            expect: Zulu17.68+203-CRaC-CA
+            crac: crac
+          - image: java_21_zulu_crac
+            base: docker.io/azul/zulu-openjdk:21.0.12.1-21.52-jdk-crac@sha256:0913be8b92eb1b0042f813ca04e7d3415781c50a14408c120e943ea6c6609d7b
+            zulu: 21.52.203
+            expect: Zulu21.52+203-CRaC-CA
+            crac: crac
+          - image: java_25_zulu_crac
+            base: docker.io/azul/zulu-openjdk:25.0.4.1-25.36-jdk-crac@sha256:8c4ae0cd57b893516042f073f1c4487a9e3653d371ae3cc142ba0fa9d8321991
+            zulu: 25.36.205
+            expect: Zulu25.36+205-CRaC-CA
+            crac: crac
+    env:
+      REPO: ghcr.io/${{ github.repository_owner }}/yolks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: build for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: |
+            ZULU_IMAGE=${{ matrix.base }}
+            ZULU_EXPECT=${{ matrix.expect }}
+          load: true
+          tags: smoke/${{ matrix.image }}
+      - name: smoke test
+        run: bash test/smoke.sh "smoke/${{ matrix.image }}" "${{ matrix.expect }}" "${{ matrix.crac }}"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: |
+            ZULU_IMAGE=${{ matrix.base }}
+            ZULU_EXPECT=${{ matrix.expect }}
+          provenance: false
+          push: true
+          tags: |
+            ${{ env.REPO }}:${{ matrix.image }}
+            ${{ env.REPO }}:${{ matrix.image }}-${{ matrix.zulu }}
+            ${{ env.REPO }}:${{ matrix.image }}-${{ matrix.zulu }}-${{ github.sha }}
+      - name: digest
+        run: echo "${{ matrix.image }} ${{ steps.push.outputs.digest }}" | tee -a "$GITHUB_STEP_SUMMARY"
