@@ -47,6 +47,25 @@ java is a child of bash, not PID 1. `jcmd 1` does not reach the server JVM. Find
 Set the server's Docker image to `ghcr.io/valhallamcio/yolks:<tag>`. Wings pulls the image before each start. The
 packages are public, so the nodes need no registry login. The change loads at the next start.
 
+## Build on a node (no registry pull)
+
+When a node cannot pull from GHCR (for example while the package is private), build the image on the node:
+
+```sh
+git clone https://github.com/valhallamcio/yolks /root/yolks   # or the commit tarball from GitHub
+cd /root/yolks && SMOKE_USER=999:995 ./build-local.sh java_25_zulu_crac
+```
+
+`build-local.sh` takes the base digest and the expected JDK from the CI matrix, builds, runs `test/smoke.sh` as the
+Wings user (`system.user.uid/gid` in `/etc/pterodactyl/config.yml`), and only then tags the pinned tag
+`ghcr.io/valhallamcio/yolks:<image>-<zulu>`. Set that exact string as the panel image.
+
+Wings (checked on v1.13.4, `environment/docker/container.go` `ensureImageExists`) pulls before every start. When the
+pull fails, it looks for a local image with exactly that tag, logs `unable to pull requested image from remote source,
+however the image exists locally`, and starts the server from it. A node without the local build cannot start the
+server. Use a server on such an image only on nodes that have the build. A local build has its own image ID. It is not
+the CI digest.
+
 ## Roll back
 
 - Set the panel image back to the old value. It loads at the next start. Wings uses the node's cached copy of the old

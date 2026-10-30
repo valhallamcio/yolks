@@ -5,15 +5,17 @@
 # Checks: tini is PID 1, tini and entrypoint.sh hashes, java -version, STARTUP eval with "{{VAR}}" and the
 # "$( [[ ! -f unix_args.txt ]] ... )" form, /opt/java/openjdk, en_US.UTF-8, libnuma.
 # With "crac": a warp checkpoint and a warp restore of test/Crac.java.
+# SMOKE_USER=uid:gid runs the container as that user (default: the caller). On a Wings node use the Wings user
+# (system.user.uid/gid in /etc/pterodactyl/config.yml).
 set -u
 IMAGE=$1 EXPECT=$2 CRAC=${3:-}
 cd "$(dirname "$0")" || exit 1
 VOL=$PWD/../.smoke/$(echo "$IMAGE" | tr -c 'A-Za-z0-9._-' _)
-rm -rf "$VOL" && mkdir -p "$VOL" && cp Crac.java "$VOL/" || exit 1
+rm -rf "$VOL" && mkdir -p "$VOL" && cp Crac.java "$VOL/" && chmod 0777 "$VOL" || exit 1
 WINGS=(--read-only --security-opt no-new-privileges --tmpfs /tmp:rw,exec,nosuid,size=100M
   --cap-drop setpcap --cap-drop mknod --cap-drop audit_write --cap-drop net_raw --cap-drop dac_override
   --cap-drop fowner --cap-drop fsetid --cap-drop net_bind_service --cap-drop sys_chroot --cap-drop setfcap
-  --user "$(id -u):$(id -g)" -v "$VOL:/home/container" -e SERVER_JARFILE=server.jar)
+  --user "${SMOKE_USER:-$(id -u):$(id -g)}" -v "$VOL:/home/container" -e SERVER_JARFILE=server.jar)
 FAIL=0
 check() { # name, grep -E pattern, text
   if grep -Eq -- "$2" <<<"$3"; then echo "PASS $1"; else echo "FAIL $1"; FAIL=1; fi
